@@ -22,15 +22,23 @@ impl LetterMask {
     }
 
     fn add(self, letter: u8) -> Self {
-        Self(self.0 | 1u32.wrapping_shl((letter - b'A') as u32))
+        Self(self.0 | 1u32.wrapping_shl(letter as u32))
     }
 
     fn contains(self, letter: u8) -> bool {
-        self.0.wrapping_shr((letter - b'A') as u32) & 1 == 1
+        self.0.wrapping_shr(letter as u32) & 1 == 1
     }
 
     fn intersects(self, other: Self) -> bool {
         self.0 & other.0 != 0
+    }
+
+    fn diff(self, other: Self) -> Self {
+        Self(self.0 & !other.0)
+    }
+
+    fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
     }
 }
 
@@ -52,13 +60,16 @@ trait Solver {
 
 fn play<G: Solver>(solver: &mut G, answer: Word) -> Option<usize> {
     solver.reset();
+    // dbg!(answer.to_string());
     let mut history = History::new();
     for attempt in 1..=64 {
         let guess = solver.guess(&history);
+        // dbg!(guess.to_string());
         if guess == answer {
             return Some(attempt);
         } else {
             let response = Response::new(guess, answer);
+            // dbg!(response.clone().to_debug_string());
             history.add_compatible(response)
         }
     }

@@ -3,8 +3,18 @@ use crate::{
     LetterMask, Word,
 };
 
+// TODO: Major logic problem: A letter existing in the answer
+// can be marked as Wrong, if another identical letter in the guess
+// is marked Correct or Misplaced.
+// Hence, a letter marked as wrong doesn't mean we can remove all
+// words containing that letter.
+
 pub struct History {
-    matches: [Option<u8>; 5],
+    // 5 groups of 5 bytes with the 1-based letter index. Zero if not seen yet
+    matches: u32,
+    // If e.g. positions 2 and 4 have known Match, then word.0 & match_mask
+    // zeros out the encodings of word at positions 1, 3 and 5.
+    match_mask: u32,
     wrongs: LetterMask,
     responses: Vec<Response>,
 }
@@ -12,25 +22,33 @@ pub struct History {
 impl History {
     pub fn new() -> Self {
         Self {
-            matches: [None; 5],
+            matches: 0,
+            match_mask: 0,
             wrongs: LetterMask::new(),
             responses: vec![],
         }
     }
 
     pub fn add_compatible(&mut self, response: Response) {
-        for ((letter, placement), matc) in response.pairs().zip(self.matches.iter_mut()) {
+        for (i, (letter, placement)) in response.pairs().enumerate() {
             match placement {
                 Placement::Correct => {
-                    if cfg!(debug_assertions) && matc.is_some_and(|x| x != letter) {
-                        panic!("{:?}", matc);
+                    let shift = 5 * i as u32;
+                    let encoding = letter as u32;
+
+                    if cfg!(debug_assertions) {
+                        let old_encoding = (self.matches >> shift) & 0x1f;
+                        if old_encoding != 0 && old_encoding != encoding {
+                            panic!();
+                        }
                     }
-                    *matc = Some(letter)
+                    self.matches |= encoding.wrapping_shl(shift);
+                    self.match_mask |= 0x1fu32.wrapping_shl(shift)
                 }
-                Placement::Wrong => self.wrongs = self.wrongs.add(letter),
-                Placement::Misplaced => {}
+                Placement::Wrong | Placement::Misplaced => {}
             }
         }
+        self.wrongs = self.wrongs.union(response.get_wrong_mask());
         self.responses.push(response)
     }
 
@@ -39,10 +57,8 @@ impl History {
         if mask.intersects(self.wrongs) {
             return false;
         };
-        for (maybe_match, letter) in self.matches.iter().zip(word.into_iter()) {
-            if maybe_match.is_some_and(|m| m != letter) {
-                return false;
-            }
+        if word.0 & self.match_mask != self.matches {
+            return false;
         }
         // TODO: This might be a bottleneck - we should add some more
         // short paths here.
